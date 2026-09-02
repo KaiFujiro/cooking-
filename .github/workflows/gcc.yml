@@ -52,7 +52,6 @@ jobs:
         ARGS="O=out ARCH=arm64 CROSS_COMPILE=${GCC_PREFIX} CROSS_COMPILE_ARM32=arm-linux-gnueabi- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS=-Wno-error"
 
         make $ARGS ${{ github.event.inputs.defconfig }}
-        make $ARGS prepare
         make -j$(nproc) $ARGS dtbs dtboimage || true
         make $ARGS dtb.img || true
         make -j$(nproc) $ARGS 2>&1 | tee compile.log

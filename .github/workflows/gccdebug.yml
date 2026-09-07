@@ -32,14 +32,14 @@ jobs:
 
     - name: Setup and Build
       run: |
-        sudo apt-get update && sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc zip gcc-arm-linux-gnueabi python3 python-is-python3 git wget curl device-tree-compiler zstd xz-utils
+        sudo apt-get update && sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc zip gcc-arm-linux-gnueabi python3 python-is-python3 git wget curl zstd xz-utils
 
         export TZ="Asia/Jakarta"
         BUILD_TIME=$(date +'%H%M-%d%m%y')
         echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_ENV
 
         mkdir -p tc/gcc
-        wget -q "https://github.com/mvaisakh/gcc-build/releases/download/23082026/eva-gcc-arm64-23082026.xz" -O tc/gcc.tar.xz
+        wget -q "https://github.com/mvaisakh/gcc-build/releases/download/06092026/eva-gcc-arm64-06092026.xz" -O tc/gcc.tar.xz
         tar -xf tc/gcc.tar.xz -C tc/gcc --strip-components=1
         export PATH=$PWD/tc/gcc/bin:$PATH
 
@@ -52,26 +52,20 @@ jobs:
         ARGS="O=out ARCH=arm64 CROSS_COMPILE=${GCC_PREFIX} CROSS_COMPILE_ARM32=arm-linux-gnueabi- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS=-Wno-error"
 
         make $ARGS ${{ github.event.inputs.defconfig }}
-        make -j$(nproc) $ARGS dtbs dtboimage || true
-        make $ARGS dtb.img || true
-        make -j$(nproc) $ARGS vmlinux Image 2>&1 | tee compile.log
+        make -j$(nproc) $ARGS vmlinux 2>&1 | tee compile.log
 
-        if [ -f out/arch/arm64/boot/Image ]; then
-          ZIP_NAME="imell-$BUILD_TIME.zip"
-          mkdir -p dts_output
-          find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./ \;
+        # --- Zip vmlinux ---
+        if [ -f out/vmlinux ]; then
+          cp out/vmlinux ./vmlinux
+          zip "vmlinux-$BUILD_TIME.zip" vmlinux
+          echo "VMLINUX_ZIP=vmlinux-$BUILD_TIME.zip" >> $GITHUB_ENV
+        fi
 
-          for f in *.dtb; do
-            [ -f "$f" ] && dtc -I dtb -O dts -o "dts_output/${f}.dts" "$f"
-          done
-
-          [ -f out/arch/arm64/boot/dtb.img ] && cp out/arch/arm64/boot/dtb.img ./
-          [ -f out/arch/arm64/boot/dtbo.img ] && cp out/arch/arm64/boot/dtbo.img ./
-          [ -f out/vmlinux ] && cp out/vmlinux ./vmlinux
-          cp out/arch/arm64/boot/Image ./
-
-          zip -r "$ZIP_NAME" Image vmlinux *.dtb *.img dts_output/ 2>/dev/null || zip -r "$ZIP_NAME" Image *.dtb *.img dts_output/
-          echo "FINAL_ZIP=$ZIP_NAME" >> $GITHUB_ENV
+        # --- Zip System.map ---
+        if [ -f out/System.map ]; then
+          cp out/System.map ./System.map
+          zip "System.map-$BUILD_TIME.zip" System.map
+          echo "SYSMAP_ZIP=System.map-$BUILD_TIME.zip" >> $GITHUB_ENV
         fi
 
     - name: Upload Artifacts
@@ -87,5 +81,15 @@ jobs:
     - name: Telegram Notification
       if: always()
       run: |
-        [ -f "compile.log" ] && curl -s -F document=@"compile.log" "https://api.telegram.org/bot${{ env.BOT_TOKEN }}/sendDocument" -F chat_id="${{ env.CHAT_ID }}" -F caption="Build log"
-        [ -f "${{ env.FINAL_ZIP }}" ] && curl -s -F document=@"${{ env.FINAL_ZIP }}" "https://api.telegram.org/bot${{ env.BOT_TOKEN }}/sendDocument" -F chat_id="${{ env.CHAT_ID }}" -F caption="build done sayangg!!!"
+        send_doc() {
+          local file="$1"
+          local caption="$2"
+          if [ -f "$file" ]; then
+            curl -s -F document=@"$file" "https://api.telegram.org/bot${{ env.BOT_TOKEN }}/sendDocument" \
+              -F chat_id="${{ env.CHAT_ID }}" -F caption="$caption"
+          fi
+        }
+
+        send_doc "compile.log" "Build log"
+        send_doc "${{ env.VMLINUX_ZIP }}" "vmlinux"
+        send_doc "${{ env.SYSMAP_ZIP }}" "System.map"
